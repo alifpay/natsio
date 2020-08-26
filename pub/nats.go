@@ -8,22 +8,23 @@ import (
 	"sync"
 	"time"
 
-	"git.alifpay.tj/providers/core/models"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/stan.go"
 )
 
 //Client of nats streaming server
 type Client struct {
-	nc   *nats.Conn
-	lock sync.RWMutex
-	sc   stan.Conn
-	cfg  models.Config
+	nc        *nats.Conn
+	lock      sync.RWMutex
+	sc        stan.Conn
+	natsURL   string
+	clusterID string
+	clientID  string
 }
 
 //New - init new nats client for publish
-func New(conf models.Config) *Client {
-	return &Client{cfg: conf}
+func New(natsURL, cluster, clientid string) *Client {
+	return &Client{natsURL: natsURL, clusterID: cluster}
 }
 
 //Run connects to nats server
@@ -36,7 +37,7 @@ func (c *Client) Run(ctx context.Context, tlsCfg *tls.Config) {
 	//if *userCreds != "" {
 	//opts = append(opts, nats.UserCredentials(*userCreds))
 	//}
-	if strings.Contains(c.cfg.NatsURL, "tls://") {
+	if strings.Contains(c.natsURL, "tls://") {
 		opts = append(opts, nats.Secure(tlsCfg))
 	}
 	//nats.ErrorHandler(logSlowConsumer)
@@ -52,9 +53,9 @@ func (c *Client) Run(ctx context.Context, tlsCfg *tls.Config) {
 		log.Println("pub ClosedHandler", nc.LastError())
 	}))
 
-	c.nc, err = nats.Connect(c.cfg.NatsURL, opts...)
+	c.nc, err = nats.Connect(c.natsURL, opts...)
 	if err != nil {
-		log.Fatalln("pub nats.Connect", c.cfg.NatsURL, err)
+		log.Fatalln("pub nats.Connect", c.natsURL, err)
 		return
 	}
 	log.Println("pub nats client is connected")
@@ -75,7 +76,7 @@ func (c *Client) close() {
 func (c *Client) streaming() {
 	var err error
 	c.lock.Lock()
-	c.sc, err = stan.Connect(c.cfg.ClusterID, c.cfg.ClientID+"-pub", stan.NatsConn(c.nc),
+	c.sc, err = stan.Connect(c.clusterID, c.clientID+"-pub", stan.NatsConn(c.nc),
 		stan.Pings(10, 5),
 		stan.SetConnectionLostHandler(func(_ stan.Conn, reason error) {
 			log.Printf("Connection lost, reason: %v", reason)

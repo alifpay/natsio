@@ -8,24 +8,28 @@ import (
 	"sync"
 	"time"
 
-	"git.alifpay.tj/providers/core/app"
-	"git.alifpay.tj/providers/core/models"
+	"github.com/alifpay/natsio/app"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/stan.go"
 )
 
 //Client of nats streaming server
 type Client struct {
-	nc   *nats.Conn
-	lock sync.RWMutex
-	sc   stan.Conn
-	srv  *app.Server
-	cfg  models.Config
+	nc           *nats.Conn
+	lock         sync.RWMutex
+	sc           stan.Conn
+	srv          *app.Server
+	natsURL      string
+	checkSubject string
+	clusterID    string
+	clientID     string
+	paySubject   string
+	durableName  string
 }
 
 //New - init new nats client for subscribe
-func New(s *app.Server, conf models.Config) *Client {
-	return &Client{srv: s, cfg: conf}
+func New(s *app.Server, natsURL, checkSubject, cluster, clientid, paySubject, durableName string) *Client {
+	return &Client{srv: s, natsURL: natsURL, checkSubject: checkSubject, clusterID: cluster, paySubject: paySubject, durableName: durableName}
 }
 
 //Run connects to nats server
@@ -38,7 +42,7 @@ func (c *Client) Run(ctx context.Context, tlsCfg *tls.Config) {
 	//if *userCreds != "" {
 	//opts = append(opts, nats.UserCredentials(*userCreds))
 	//}
-	if strings.Contains(c.cfg.NatsURL, "tls://") {
+	if strings.Contains(c.natsURL, "tls://") {
 		opts = append(opts, nats.Secure(tlsCfg))
 	}
 	//nats.ErrorHandler(logSlowConsumer)
@@ -54,39 +58,19 @@ func (c *Client) Run(ctx context.Context, tlsCfg *tls.Config) {
 		log.Println("sub closedHandler", nc.LastError())
 	}))
 
-	c.nc, err = nats.Connect(c.cfg.NatsURL, opts...)
+	c.nc, err = nats.Connect(c.natsURL, opts...)
 	if err != nil {
-		log.Fatalln("sub nats.Connect", c.cfg.NatsURL, err)
+		log.Fatalln("sub nats.Connect", c.natsURL, err)
 		return
 	}
 
 	//Subscribe check account Request-Reply
-	_, err = c.nc.Subscribe(c.cfg.CheckSubject+"-gob", c.checkGOB)
+	_, err = c.nc.Subscribe(c.checkSubject, c.check)
 	if err != nil {
-		log.Fatalln("nc.Subscribe c.CheckSubject gob", c.cfg.CheckSubject, err)
+		log.Fatalln("nc.Subscribe c.CheckSubject gob", c.checkSubject, err)
 		return
 	}
 
-	//Subscribe check account Request-Reply json encoding
-	_, err = c.nc.Subscribe(c.cfg.CheckSubject+"-json", c.checkJSON)
-	if err != nil {
-		log.Fatalln("nc.Subscribe c.CheckSubject json", c.cfg.CheckSubject, err)
-		return
-	}
-
-	//Subscribe status of payment Request-Reply
-	_, err = c.nc.Subscribe(c.cfg.StatusSubject+"-gob", c.statusGOB)
-	if err != nil {
-		log.Fatalln("nc.Subscribe StatusSubject gob", c.cfg.StatusSubject, err)
-		return
-	}
-
-	//Subscribe status of payment Request-Reply json encoding
-	_, err = c.nc.Subscribe(c.cfg.StatusSubject+"-json", c.statusJSON)
-	if err != nil {
-		log.Fatalln("nc.Subscribe StatusSubject json", c.cfg.StatusSubject, err)
-		return
-	}
 	log.Println("sub nats client is connected")
 	c.streaming()
 	<-ctx.Done()
@@ -105,7 +89,7 @@ func (c *Client) close() {
 func (c *Client) streaming() {
 	var err error
 	c.lock.Lock()
-	c.sc, err = stan.Connect(c.cfg.ClusterID, c.cfg.ClientID+"-sub", stan.NatsConn(c.nc),
+	c.sc, err = stan.Connect(c.clusterID, c.clientID+"-sub", stan.NatsConn(c.nc),
 		stan.Pings(10, 5),
 		stan.SetConnectionLostHandler(func(_ stan.Conn, reason error) {
 			log.Printf("Connection lost, reason: %v", reason)
@@ -119,26 +103,9 @@ func (c *Client) streaming() {
 	}
 
 	// Subscribe payment request subject gob encoding with durable name
-	_, err = c.sc.Subscribe(c.cfg.PaySubject+"-gob", c.paymentsGOB, stan.DurableName(c.cfg.DurableName))
+	_, err = c.sc.Subscribe(c.paySubject, c.payment, stan.DurableName(c.durableName))
 	if err != nil {
 		log.Printf("sc.Subscribe: %v", err)
 	}
 
-	// Subscribe payment request subject json encoding with durable name
-	_, err = c.sc.Subscribe(c.cfg.PaySubject+"-json", c.paymentsJSON, stan.DurableName(c.cfg.DurableName))
-	if err != nil {
-		log.Printf("sc.Subscribe: %v", err)
-	}
-
-	// Subscribe payment retry subject with durable name
-	_, err = c.sc.Subscribe(c.cfg.RetrySubject, c.paymentsJSON, stan.DurableName(c.cfg.DurableName))
-	if err != nil {
-		log.Printf("sc.Subscribe: %v", err)
-	}
-
-	// Subscribe payment status check subject with durable name
-	_, err = c.sc.Subscribe(c.cfg.StatusCheckSubject, c.paymentsJSON, stan.DurableName(c.cfg.DurableName))
-	if err != nil {
-		log.Printf("sc.Subscribe: %v", err)
-	}
 }
