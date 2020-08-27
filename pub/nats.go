@@ -93,7 +93,6 @@ func (c *Client) streaming() {
 //Reply - publish response of request
 func (c *Client) Reply(replyTo string, data []byte) {
 	err := c.nc.Publish(replyTo, data)
-	c.nc.Flush()
 	if err != nil {
 		log.Println("nc.Publish", err)
 	}

@@ -18,20 +18,27 @@ func main() {
 	np := pub.New("nats://127.0.0.1:4222", "alif-dev", "dev-test")
 	go np.Run(ctx, nil)
 
-	srv := app.New("Test", "123456789", np)
+	srv := app.New(np)
 
 	//subscriber nats client
 	ns := sub.New(srv, "nats://127.0.0.1:4222", "test-check-acc", "alif-dev", "dev-test", "test-pay", "testclient0")
 	go ns.Run(ctx, nil)
-	log.Println("server is running")
+
 	//catches signal OS interruption and sends cancel to context
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigs
+		log.Println("shutdown signal received")
+		signal.Stop(sigs)
+		close(sigs)
+		cancel()
+	}()
 
-	<-sigs
-	log.Println("shutdown signal received")
-	signal.Stop(sigs)
-	close(sigs)
-	cancel()
-
+	log.Println("server is running")
+	err := srv.Run("127.0.0.1:50051")
+	if err != nil {
+		log.Fatalln("srv.Run 127.0.0.1:50051", err)
+	}
+	log.Println("server is closed")
 }

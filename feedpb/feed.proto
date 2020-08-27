@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package feedpb;
+option go_package="feedpb";
+
+message FeedRequest {
+    string feed = 1;
+    string replyTo = 2;
+}
+
+message FeedResponse {
+    string feed = 1;
+    string replyTo = 2;
+}
+
+service Feeds {
+    // bi-directional rpc
+    rpc Broadcast(stream FeedRequest) returns (stream FeedResponse){};
+}
